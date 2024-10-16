@@ -31,15 +31,16 @@ void TeleopTwistJoyComfy::getParam()
   speed_up_down_scale_angular_z_ = this->declare_parameter("speed_up_down_scale_angular_z", 1.0);
 
   publish_twist_stamped_ = this->declare_parameter("publish_twist_stamped", true);
+
+  frame_id_ = this->declare_parameter("frame_id", "teleop_twist_joy_comfy");
 }
 
 void TeleopTwistJoyComfy::initPublisher()
 {
   if (!publish_twist_stamped_)
-    twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("botwheel_explorer/cmd_vel", 10);
+    twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
   else
-    twist_stamped_pub_ =
-      this->create_publisher<geometry_msgs::msg::TwistStamped>("botwheel_explorer/cmd_vel", 10);
+    twist_stamped_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("/cmd_vel", 10);
 }
 
 void TeleopTwistJoyComfy::initSubscription()
@@ -77,24 +78,25 @@ void TeleopTwistJoyComfy::joy_callback(const sensor_msgs::msg::Joy::ConstSharedP
     stopVelocity();
   }
 
-  button_b_state_ = joy->buttons[B];
-
-  button_lb_state_ = joy->buttons[4];
-  button_rb_state_ = joy->buttons[5];
+  manageButtonsState(joy);
 }
 
-void TeleopTwistJoyComfy::autoTeleopStart() { auto_teleop_mode_ = true; }
+void TeleopTwistJoyComfy::autoTeleopStart()
+{
+  RCLCPP_INFO(this->get_logger(), "auto teleop start");
+
+  auto_teleop_mode_ = true;
+}
 
 void TeleopTwistJoyComfy::autoTeleopEnd()
 {
+  RCLCPP_INFO(this->get_logger(), "auto teleop end");
+
   auto_teleop_mode_ = false;
 
-  speed_down_linear_x_lock_ = false;
-  speed_up_linear_x_lock_ = false;
-  speed_down_angular_z_lock_ = false;
-  speed_up_angular_z_lock_ = false;
-
   stopVelocity();
+
+  resetAllSpeedUpDownLocks();
 }
 
 void TeleopTwistJoyComfy::autoTeleop(const sensor_msgs::msg::Joy::ConstSharedPtr joy)
@@ -111,8 +113,11 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
   auto twist = std::make_unique<T>();
 
   double linear_x = 0, angular_z = 0;
+
+  // clang-format off
   if (auto_teleop_mode_) {
-    linear_x = linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_;
+    linear_x = 
+      linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_;
     angular_z =
       (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_) * joy->axes[3];
 
@@ -121,8 +126,10 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
       angular_z = std::clamp(angular_z, 0., angular_z_max_);
     else if (joy->axes[3] < 0)
       angular_z = std::clamp(angular_z, -1. * angular_z_max_, 0.);
+  
   } else {
-    linear_x = (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_) * joy->axes[1];
+    linear_x = 
+      (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_) * joy->axes[1];
     angular_z =
       (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_) * joy->axes[0];
 
@@ -137,6 +144,33 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
       angular_z = std::clamp(angular_z, -1. * angular_z_max_, 0.);
   }
 
+  // clang-format on
+
+  manageSpeedUpDownLocks();
+
+  if constexpr (std::is_same<T, geometry_msgs::msg::Twist>::value) {
+    twist->linear.x = linear_x;
+    twist->angular.z = angular_z;
+  } else if constexpr (std::is_same<T, geometry_msgs::msg::TwistStamped>::value) {
+    twist->header.frame_id = frame_id_;
+    twist->header.stamp = this->get_clock()->now();
+    twist->twist.linear.x = linear_x;
+    twist->twist.angular.z = angular_z;
+  }
+
+  return twist;
+}
+
+void TeleopTwistJoyComfy::resetAllSpeedUpDownLocks()
+{
+  speed_down_linear_x_lock_ = false;
+  speed_up_linear_x_lock_ = false;
+  speed_down_angular_z_lock_ = false;
+  speed_up_angular_z_lock_ = false;
+}
+
+void TeleopTwistJoyComfy::manageSpeedUpDownLocks()
+{
   if (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_ < 0)
     speed_down_linear_x_lock_ = true;
   else
@@ -156,18 +190,14 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
     speed_up_angular_z_lock_ = true;
   else
     speed_up_angular_z_lock_ = false;
+}
 
-  if constexpr (std::is_same<T, geometry_msgs::msg::Twist>::value) {
-    twist->linear.x = linear_x;
-    twist->angular.z = angular_z;
-  } else if constexpr (std::is_same<T, geometry_msgs::msg::TwistStamped>::value) {
-    twist->header.frame_id = "";
-    twist->header.stamp = this->get_clock()->now();
-    twist->twist.linear.x = linear_x;
-    twist->twist.angular.z = angular_z;
-  }
+void TeleopTwistJoyComfy::manageButtonsState(const sensor_msgs::msg::Joy::ConstSharedPtr joy)
+{
+  button_b_state_ = joy->buttons[B];
 
-  return twist;
+  button_lb_state_ = joy->buttons[4];
+  button_rb_state_ = joy->buttons[5];
 }
 
 template <typename T>
@@ -204,28 +234,40 @@ void TeleopTwistJoyComfy::manualTeleop(const sensor_msgs::msg::Joy::ConstSharedP
 
 void TeleopTwistJoyComfy::changeLinearVelocity(const sensor_msgs::msg::Joy::ConstSharedPtr joy)
 {
+  // clang-format off
   if (!speed_down_linear_x_lock_) {
-    if (joy->buttons[4] && !button_lb_state_)
+    if (joy->buttons[4] && !button_lb_state_) {
       speed_up_down_linear_x_ -= speed_up_down_linear_x_original_;
+      RCLCPP_INFO(this->get_logger(), "linear_x speed down: %f [m/s]", linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_);
+    }
   }
 
   if (!speed_up_linear_x_lock_) {
-    if (joy->buttons[5] && !button_rb_state_)
+    if (joy->buttons[5] && !button_rb_state_) {
       speed_up_down_linear_x_ += speed_up_down_linear_x_original_;
+      RCLCPP_INFO(this->get_logger(), "linear_x speed up: %f [m/s]", linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_);
+    }
   }
+  // clang-format on
 }
 
 void TeleopTwistJoyComfy::changeAngularVelocity(const sensor_msgs::msg::Joy::ConstSharedPtr joy)
 {
+  // clang-format off
   if (!speed_down_angular_z_lock_) {
-    if (joy->buttons[4] && !button_lb_state_)
+    if (joy->buttons[4] && !button_lb_state_) {
       speed_up_down_angular_z_ -= speed_up_down_angular_z_original_;
+      RCLCPP_INFO(this->get_logger(), "angular_z speed down: %f [rad/s]", angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_);
+    }
   }
 
   if (!speed_up_angular_z_lock_) {
-    if (joy->buttons[5] && !button_rb_state_)
+    if (joy->buttons[5] && !button_rb_state_) {
       speed_up_down_angular_z_ += speed_up_down_angular_z_original_;
+      RCLCPP_INFO(this->get_logger(), "angular_z speed up: %f [rad/s]", angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_);
+    }
   }
+  // clang-format on
 }
 
 void TeleopTwistJoyComfy::stopVelocity()

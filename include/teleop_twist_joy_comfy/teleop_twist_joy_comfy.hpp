@@ -36,6 +36,11 @@ protected:
 
   void stopVelocity();
 
+  void resetAllSpeedUpDownLocks();
+  void manageSpeedUpDownLocks();
+
+  void manageButtonsState(const sensor_msgs::msg::Joy::ConstSharedPtr joy);
+
   template <typename T>
   std::unique_ptr<T> calcTwist(const sensor_msgs::msg::Joy::ConstSharedPtr joy);
 
@@ -61,6 +66,7 @@ private:
   double speed_up_down_scale_linear_x_;
   double speed_up_down_scale_angular_z_;
   bool publish_twist_stamped_;
+  std::string frame_id_;
 
   bool auto_teleop_mode_ = false;
   bool button_b_state_ = false;

@@ -65,9 +65,9 @@ void TeleopTwistJoyComfy::joy_callback(const sensor_msgs::msg::Joy::ConstSharedP
     autoTeleop(joy);
   }
 
-  // if (joy->buttons[X]) {
-  //   manualTeleop(joy);
-  // }
+  if (joy->buttons[X]) {
+    manualTeleop(joy);
+  }
 
   if (joy->buttons[Y]) {
     changeLinearVelocity(joy);
@@ -89,6 +89,11 @@ void TeleopTwistJoyComfy::autoTeleopEnd()
 {
   auto_teleop_mode_ = false;
 
+  speed_down_linear_x_lock_ = false;
+  speed_up_linear_x_lock_ = false;
+  speed_down_angular_z_lock_ = false;
+  speed_up_angular_z_lock_ = false;
+
   stopVelocity();
 }
 
@@ -107,29 +112,9 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
 
   double linear_x = 0, angular_z = 0;
   if (auto_teleop_mode_) {
-    linear_x += linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_;
-    angular_z +=
+    linear_x = linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_;
+    angular_z =
       (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_) * joy->axes[3];
-
-    if (linear_x < 0)
-      speed_down_linear_x_lock_ = true;
-    else
-      speed_down_linear_x_lock_ = false;
-
-    if (linear_x > linear_x_max_)
-      speed_up_linear_x_lock_ = true;
-    else
-      speed_up_linear_x_lock_ = false;
-
-    if (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_ < 0)
-      speed_down_angular_z_lock_ = true;
-    else
-      speed_down_angular_z_lock_ = false;
-
-    if (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_ > angular_z_max_)
-      speed_up_angular_z_lock_ = true;
-    else
-      speed_up_angular_z_lock_ = false;
 
     linear_x = std::clamp(linear_x, 0., linear_x_max_);
     if (joy->axes[3] > 0)
@@ -137,7 +122,40 @@ std::unique_ptr<T> TeleopTwistJoyComfy::calcTwist(const sensor_msgs::msg::Joy::C
     else if (joy->axes[3] < 0)
       angular_z = std::clamp(angular_z, -1. * angular_z_max_, 0.);
   } else {
+    linear_x = (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_) * joy->axes[1];
+    angular_z =
+      (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_) * joy->axes[0];
+
+    if (joy->axes[1] > 0)
+      linear_x = std::clamp(linear_x, 0., linear_x_max_);
+    else if (joy->axes[1] < 0)
+      linear_x = std::clamp(linear_x, -1. * linear_x_max_, 0.);
+
+    if (joy->axes[0] > 0)
+      angular_z = std::clamp(angular_z, 0., angular_z_max_);
+    else if (joy->axes[0] < 0)
+      angular_z = std::clamp(angular_z, -1. * angular_z_max_, 0.);
   }
+
+  if (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_ < 0)
+    speed_down_linear_x_lock_ = true;
+  else
+    speed_down_linear_x_lock_ = false;
+
+  if (linear_x_ + speed_up_down_linear_x_ * speed_up_down_scale_linear_x_ > linear_x_max_)
+    speed_up_linear_x_lock_ = true;
+  else
+    speed_up_linear_x_lock_ = false;
+
+  if (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_ < 0)
+    speed_down_angular_z_lock_ = true;
+  else
+    speed_down_angular_z_lock_ = false;
+
+  if (angular_z_ + speed_up_down_angular_z_ * speed_up_down_scale_angular_z_ > angular_z_max_)
+    speed_up_angular_z_lock_ = true;
+  else
+    speed_up_angular_z_lock_ = false;
 
   if constexpr (std::is_same<T, geometry_msgs::msg::Twist>::value) {
     twist->linear.x = linear_x;
